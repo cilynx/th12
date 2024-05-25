@@ -62,36 +62,42 @@ class Session:
         return datetime.datetime(self.year, self.month, self.day, self.hour, self.min, self.sec)
 
     def load(self):
-            offset = data['offset']
+        with open(self.filepath, 'rb') as self.file:
+            self.file.seek(data['offset'])
             self.segments = []
             pSegment = None
             count = 0
-            while offset < self.bytelength:
-                segment = Segment(self, offset)
+            while self.file.tell() < self.bytelength:
+                segment = Segment(self)
                 self.segments.append(segment)
-                offset += data['header_length'] + data['packet_length'] * data['packet_count']
                 if pSegment:
-                    # print(count, 'Diff:', segment.time - pSegment.time)
-                    if segment.time - pSegment.time < 10000:
-                        print(segment.time - pSegment.time)
+                    print(count, 'Diff:', segment.time - pSegment.time)
                     count += 1
                 pSegment = segment
 
 
 class Segment:
-    def __init__(self, session, offset):
-        with open(session.filepath, 'rb') as file:
-            file.seek(offset)
-            self.header = file.read(data['header_length'])
-            flag = self.header[0:2]
-            bookmark = self.header[2:3]
-            unsure = self.header[3:4]
-            self.time = int(self.header[4:].hex(),16)
-            # print(self.header.hex(), self.time)
+    def __init__(self, session):
+        self.session = session
+        self.file = self.session.file
+        self.header = self.file.read(data['header_length'])
+        if self.header[0:2] != b'\xff\x7f':
+            raise Exception(f"Doesn't look like a segment header: {self.header.hex()}")
+        print(self.header.hex())
+        flag = self.header[0:2]
+        bookmark = self.header[2:3]
+        unsure = self.header[3:4]
+        self.time = int(self.header[4:].hex(),16)
+        self.readings = []
+        for i in range(500):
+            reading = Reading(self)
+            self.readings.append(reading)
 
 class Reading:
-    def __init__(self, packet):
-        self.packet = packet
+    def __init__(self, segment):
+        packet = segment.file.read(data['packet_length'])
+        if packet[-2:] != b'\x00\x00':
+            raise Exception(f"Doesn't look like a data packet: {packet.hex()}")
         self.LA = int.from_bytes(packet[0:2], signed=True, byteorder='little')
         self.RA = int.from_bytes(packet[2:4], signed=True, byteorder='little')
         self.V1 = int.from_bytes(packet[4:6], signed=True, byteorder='little')
@@ -100,6 +106,7 @@ class Reading:
         self.V4 = int.from_bytes(packet[10:12], signed=True, byteorder='little')
         self.V5 = int.from_bytes(packet[12:14], signed=True, byteorder='little')
         self.V6 = int.from_bytes(packet[14:16], signed=True, byteorder='little')
+        print("", packet.hex())
 
     @property
     def LL(self):
