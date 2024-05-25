@@ -28,21 +28,10 @@ attributes = {
     "sid": [0x395, 0xA],
 }
 
-data = {
-    # Data block starts at 0xB55
-    "offset": 0xB55,
-    # Segment headers are 8 bytes long
-    "header_length": 8,
-    # Data packets are 18 bytes long
-    "packet_length": 18,
-    # Each segment has 500 packets
-    "packet_count": 500
-}
-
 ################################################################################
 # A Session represents a full .dat file.
 #
-# It contains various identifying heder attributes and 43200 segments for a full
+# It contains various identifying heder attributes and 43200-segments for a full
 # 24-hour run.
 ################################################################################
 
@@ -50,6 +39,7 @@ class Session:
     def __init__(self, filepath):
         self.filepath = filepath
         self._bytelength = None
+        self.count = 0
         with open(filepath, 'rb') as self.file:
             for attribute in attributes:
                 self.file.seek(attributes[attribute][0])
@@ -65,22 +55,20 @@ class Session:
         return self._bytelength
 
     @property
-    def timestamp(self):
+    def start(self):
         return datetime.datetime(self.year, self.month, self.day, self.hour, self.min, self.sec)
 
     def load(self):
         with open(self.filepath, 'rb') as self.file:
-            self.file.seek(data['offset'])
+            # Data block always starts at 0xB55
+            self.file.seek(0xB55)
             self.segments = []
-            pSegment = None
             count = 0
             while self.file.tell() < self.bytelength:
                 segment = Segment(self)
                 self.segments.append(segment)
-                if pSegment and segment.time - pSegment.time > 60000:
-                    print(count, ',', segment.time - pSegment.time)
                 count += 1
-                pSegment = segment
+                print(count)
 
 ################################################################################
 # A Segment contains 500-Readings over 2-seconds as well as some sort of
@@ -88,21 +76,28 @@ class Session:
 ################################################################################
 
 class Segment:
+
     def __init__(self, session):
         self.session = session
         self.file = self.session.file
-        self.header = self.file.read(data['header_length'])
-        if self.header[0:2] != b'\xff\x7f':
+        # Segment headers are always 8 bytes long
+        self.header = self.file.read(8)
+        self.sigil = self.header[0:2]
+        if self.sigil not in (b'\xff\x7f', b'\x00\x00'):
             raise Exception(f"Doesn't look like a segment header: {self.header.hex()}")
-        # print(self.header.hex())
-        flag = self.header[0:2]
-        bookmark = self.header[2:3]
-        unsure = self.header[3:4]
-        self.time = int(self.header[4:].hex(),16)
+        self.bookmark = self.header[2:3]
+        # if self.bookmark != b'\00':
+        #     print('Bookmark:', self.bookmark, self.header.hex())
+        self.unsure = self.header[3:4]
+        # if self.unsure != b'\00':
+        #     print('Unsure:', self.unsure, self.header.hex())
+        self.time = datetime.timedelta(hours=self.header[4], minutes=self.header[5], seconds=self.header[6]+self.header[7]/255)
         self.readings = []
+        # Segments always have 500-Readings
         for i in range(500):
             reading = Reading(self)
             self.readings.append(reading)
+            self.session.count += 1
 
 ################################################################################
 # A Reading represents 8-measurements at a single point in time.
@@ -111,7 +106,8 @@ class Segment:
 
 class Reading:
     def __init__(self, segment):
-        packet = segment.file.read(data['packet_length'])
+        # Data packets are always 18-bytes long
+        packet = segment.file.read(18)
         if packet[-2:] != b'\x00\x00':
             raise Exception(f"Doesn't look like a data packet: {packet.hex()}")
         self.LA = int.from_bytes(packet[0:2], signed=True, byteorder='little')
