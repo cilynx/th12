@@ -39,6 +39,13 @@ data = {
     "packet_count": 500
 }
 
+################################################################################
+# A Session represents a full .dat file.
+#
+# It contains various identifying heder attributes and 43200 segments for a full
+# 24-hour run.
+################################################################################
+
 class Session:
     def __init__(self, filepath):
         self.filepath = filepath
@@ -70,11 +77,15 @@ class Session:
             while self.file.tell() < self.bytelength:
                 segment = Segment(self)
                 self.segments.append(segment)
-                if pSegment:
-                    print(count, 'Diff:', segment.time - pSegment.time)
-                    count += 1
+                if pSegment and segment.time - pSegment.time > 60000:
+                    print(count, ',', segment.time - pSegment.time)
+                count += 1
                 pSegment = segment
 
+################################################################################
+# A Segment contains 500-Readings over 2-seconds as well as some sort of
+# timing/count data as well as potentially bookmark information
+################################################################################
 
 class Segment:
     def __init__(self, session):
@@ -83,7 +94,7 @@ class Segment:
         self.header = self.file.read(data['header_length'])
         if self.header[0:2] != b'\xff\x7f':
             raise Exception(f"Doesn't look like a segment header: {self.header.hex()}")
-        print(self.header.hex())
+        # print(self.header.hex())
         flag = self.header[0:2]
         bookmark = self.header[2:3]
         unsure = self.header[3:4]
@@ -92,6 +103,11 @@ class Segment:
         for i in range(500):
             reading = Reading(self)
             self.readings.append(reading)
+
+################################################################################
+# A Reading represents 8-measurements at a single point in time.
+# Each measurement is 2-bytes, little-endian.
+################################################################################
 
 class Reading:
     def __init__(self, segment):
@@ -106,16 +122,16 @@ class Reading:
         self.V4 = int.from_bytes(packet[10:12], signed=True, byteorder='little')
         self.V5 = int.from_bytes(packet[12:14], signed=True, byteorder='little')
         self.V6 = int.from_bytes(packet[14:16], signed=True, byteorder='little')
-        print("", packet.hex())
+        # print("", packet.hex())
 
     @property
     def LL(self):
-        # Left leg is just a ground
+        # I think left leg is just a ground since we only have eight points
         return 0
 
     @property
     def RL(self):
-        # Right leg is just a ground
+        # I think right leg is just a ground since we only have eight points
         return 0
 
     @property
